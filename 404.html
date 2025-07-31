@@ -1,49 +1,97 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <!-- 
-      This is an HTML comment
-      You can write text in a comment and the content won't be visible in the page
-    -->
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Test invio foto al foglio</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 500px; margin: auto; }
+    label, input, button { display: block; margin-top: 15px; width: 100%; font-size: 1.1em; }
+    #thumbImg { margin-top: 20px; max-width: 100%; border: 1px solid #ccc; }
+    #status { margin-top: 15px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>Debug: Invio al Foglio Google</h2>
 
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="https://glitch.com/favicon.ico" />
+  <label>Nome Operatore:
+    <input type="text" id="opName" placeholder="Es. Mario Rossi" />
+  </label>
 
-    <!--
-      This is the page head - it contains info the browser uses
-      Like the title, which appears on the browser tab but not inside the page
-      Further down you'll see the content that displays in the page
-    -->
-    <title>404!</title>
+  <button id="takePic">📷 Scatta foto e invia</button>
+  <p id="status">In attesa...</p>
+  <img id="thumbImg" alt="Miniatura"/>
 
-    <!-- The website stylesheet -->
-    <link rel="stylesheet" href="/style.css" />
+<script>
+document.getElementById('takePic').onclick = async () => {
+  const status = document.getElementById('status');
+  const op = document.getElementById('opName').value.trim();
+  if (!op) {
+    alert('Inserisci il nome dell’operatore');
+    return;
+  }
 
-    <!-- The website JavaScript file -->
-    <script src="/script.js" defer></script>
-  </head>
-  <body>
-    <!--
-      The body includes the content you see in the page
-      Each element is defined using tags, like this <div></div>
-      The attributes like class="wrapper" let us style elements in the CSS
-    -->
-    <div class="wrapper">
-      <div class="content" role="main">
-        <h1 class="title">404 Not Found 😭</h1>
-        <img
-          src="/cool-website.svg"
-          class="illustration-404"
-          alt="not so cool website"
-        />
-        <div class="instructions">
-          <p>
-            WELP this page couldn't be found – <a href="/">go to the homepage</a>
-          </p>
+  if (!navigator.geolocation || !navigator.mediaDevices) {
+    alert('Il tuo dispositivo non supporta GPS o fotocamera.');
+    return;
+  }
 
-        </div>
-      </div>
-    </div>
-  </body>
-</html>
+  try {
+    status.textContent = '📍 Ottengo posizione...';
+    const pos = await new Promise((res, rej) =>
+      navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true })
+    );
+
+    const { latitude, longitude } = pos.coords;
+    const now = new Date();
+    const date = now.toISOString().slice(0, 10);
+    const time = now.toTimeString().slice(0, 8);
+
+    status.textContent = '📸 Scatto foto...';
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const track = stream.getVideoTracks()[0];
+    const capture = new ImageCapture(track);
+    const photo = await capture.takePhoto();
+    track.stop();
+
+    const fullBlob = new Blob([photo], { type: 'image/jpeg' });
+    const fullBase64 = await blobToBase64(fullBlob);
+
+    const img = await createImageBitmap(fullBlob);
+    const scale = 150 / Math.max(img.width, img.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const thumbBlob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.7));
+    const thumbBase64 = await blobToBase64(thumbBlob);
+
+    document.getElementById('thumbImg').src = canvas.toDataURL();
+    status.textContent = '📤 Invio dati...';
+
+    const payload = {
+      operatore: op,
+      date, time,
+      latitude, longitude,
+      photoFull: fullBase64,
+      photoThumb: thumbBase64
+    };
+
+    console.log('📦 Payload da inviare:', payload);
+
+    const response = await fetch('https://script.google.com/macros/s/AKfycbxK4gY2M5vL5Vdk5fwPZMk21F_FIUf6lEEWqF2YyRJULW529suwlT1q9p4Vqjdc6Pkq/exec', {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    console.log('📬 Risposta ricevuta:', response);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const res = await response.json();
+    console.log('📨 Risposta J
